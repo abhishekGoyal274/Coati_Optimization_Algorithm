@@ -1,0 +1,67 @@
+# ==========================================
+# C++ Compiler & Build Outputs
+# ==========================================
+# Compiled Object files
+*.o
+*.obj
+*.gch
+*.pch
+
+# Compiled Dynamic Libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static Libraries
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# ==========================================
+# Build Systems (CMake, Make, Ninja)
+# ==========================================
+# Ignore the entire build directory where binaries are compiled
+[Build]
+[build]/
+build/
+CMakeFiles/
+CMakeCache.txt
+CMakePresets.json
+Makefile
+cmake_install.cmake
+*.cmake
+
+# ==========================================
+# IDEs and Text Editors
+# ==========================================
+# Visual Studio Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Visual Studio (MSVC)
+.vs/
+*.user
+*.suo
+*.sln
+*.vcxproj
+*.filters
+
+# CLion / JetBrains
+.idea/
+cmake-build-*/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+
+# ==========================================
+# Operating System Junk
+# ==========================================
+Thumbs.db
+.DS_Store
