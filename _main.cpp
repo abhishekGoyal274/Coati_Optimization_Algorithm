@@ -14,7 +14,6 @@ struct COAResult
 };
 
 static std::mt19937_64 rng{std::random_device{}()};
-
 static std::uniform_real_distribution<double> dist(0.0, 1.0);
 static std::uniform_int_distribution<int> coin(1, 2);
 
