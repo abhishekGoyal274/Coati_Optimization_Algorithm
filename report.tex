@@ -1,0 +1,725 @@
+% =============================================================================
+% Coati Optimization Algorithm — HPC Performance Report
+% =============================================================================
+\documentclass[12pt, a4paper]{article}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{longtable}
+
+% ── Colors ────────────────────────────────────────────────────────────────────
+\definecolor{svnitblue}{RGB}{0, 51, 102}
+\definecolor{codegreen}{RGB}{0, 128, 0}
+\definecolor{codegray}{RGB}{128, 128, 128}
+\definecolor{linkblue}{RGB}{0, 102, 204}
+
+% ── Hyperlink Setup ───────────────────────────────────────────────────────────
+\hypersetup{
+    colorlinks=true,
+    linkcolor=svnitblue,
+    urlcolor=linkblue,
+    citecolor=svnitblue,
+}
+
+% ── Code Listing Style ────────────────────────────────────────────────────────
+\lstset{
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{svnitblue}\bfseries,
+    commentstyle=\color{codegreen},
+    stringstyle=\color{red!70!black},
+    numbers=left,
+    numberstyle=\tiny\color{codegray},
+    numbersep=8pt,
+    frame=single,
+    breaklines=true,
+    captionpos=b,
+    tabsize=4,
+    showstringspaces=false,
+}
+
+% ── Header/Footer ─────────────────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small COA — HPC Performance Report}
+\fancyhead[R]{\small SVNIT Summer 2026}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% ── Title ─────────────────────────────────────────────────────────────────────
+\title{
+    \vspace{-1cm}
+    {\Large \textbf{High-Performance Computing Analysis of the\\Coati Optimization Algorithm}}\\[0.5cm]
+    {\large Sequential C++ $\cdot$ OpenMP $\cdot$ CUDA}\\[0.3cm]
+    {\normalsize Summer Research Project — SVNIT}
+}
+\author{
+    \textbf{Abhishek Goyal}\\
+    Sardar Vallabhbhai National Institute of Technology, Surat\\
+    \texttt{abhishekgoyal274}
+}
+\date{June 2026}
+
+% =============================================================================
+\begin{document}
+% =============================================================================
+
+\maketitle
+\thispagestyle{fancy}
+
+% ── Abstract ──────────────────────────────────────────────────────────────────
+\begin{abstract}
+This report presents a comprehensive high-performance computing (HPC) analysis of the Coati Optimization Algorithm (COA), a bio-inspired metaheuristic proposed by Dehghani et al.\ (2023). We implement COA in three parallel paradigms — sequential C++, OpenMP (shared-memory), and CUDA C++ (GPU) — and benchmark it across 10 classical optimization functions with 150 unique configurations and 5,250 total experiment runs. Our analysis covers convergence behavior, parallel speedup, efficiency, Amdahl's Law modeling, and CPU-vs-GPU performance. Key findings include a maximum OpenMP speedup of 2.81$\times$ at 8 threads, CUDA speedup up to 4.36$\times$ for compute-intensive functions, and the identification of an optimal thread range of 4--8 for shared-memory parallelism. We also characterize the significant OpenMP runtime overhead ($\sim$27\%) and the high serial fraction inherent in COA's iterative structure.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Introduction}
+% =============================================================================
+
+\subsection{Background}
+
+Metaheuristic optimization algorithms are widely used to solve complex, non-linear, and multi-dimensional optimization problems where classical gradient-based methods fail. The \textbf{Coati Optimization Algorithm (COA)}, proposed by Dehghani et al.\ \cite{dehghani2023}, is a nature-inspired population-based algorithm that mimics the hunting behavior of coatis (members of the raccoon family) as they attack iguanas.
+
+COA operates in two phases per iteration:
+\begin{enumerate}
+    \item \textbf{Exploitative Phase (Global Search)}: The first half of the population attacks the ``Iguana'' (current best solution), while the second half explores random positions.
+    \item \textbf{Exploration Phase (Local Search)}: All coatis perform local perturbations within shrinking bounds, enabling fine-grained search as iterations progress.
+\end{enumerate}
+
+\subsection{Motivation}
+
+While COA has been shown to be competitive with other metaheuristics, its parallelization potential on modern HPC architectures has not been extensively studied. This project investigates:
+
+\begin{itemize}
+    \item How effectively can COA be parallelized using shared-memory (OpenMP) and GPU (CUDA) paradigms?
+    \item What is the relationship between problem characteristics (function complexity, population size) and parallel scalability?
+    \item Where are the bottlenecks, and what does Amdahl's Law predict about maximum achievable speedup?
+\end{itemize}
+
+\subsection{Contributions}
+
+\begin{enumerate}
+    \item Three complete implementations of COA: sequential C++, OpenMP, and CUDA C++.
+    \item A comprehensive benchmarking framework with 5,250 experiment runs across 150 configurations.
+    \item Automated performance analysis producing 14 publication-quality visualizations.
+    \item Quantitative analysis of parallel efficiency, Amdahl's Law serial fractions, and GPU acceleration factors.
+\end{enumerate}
+
+% =============================================================================
+\section{Algorithm Description}
+% =============================================================================
+
+\subsection{COA Pseudocode}
+
+The Coati Optimization Algorithm follows this high-level structure:
+
+\begin{enumerate}
+    \item \textbf{Initialize} population $X$ of $N$ coatis in $D$-dimensional search space.
+    \item \textbf{Evaluate} fitness of all coatis; identify the best (``Iguana'').
+    \item \textbf{For each iteration} $t = 1, 2, \ldots, T$:
+    \begin{enumerate}[label=\alph*.]
+        \item \textbf{Exploitative Phase}:
+        \begin{itemize}
+            \item First half ($i < N/2$): Update position toward Iguana
+            \[
+                X_i^{new}(j) = X_i(j) + r \cdot \left( \text{Iguana}(j) - I \cdot X_i(j) \right), \quad I \in \{1, 2\}
+            \]
+            \item Second half ($i \geq N/2$): Generate random IguanaG; move toward or away based on fitness comparison.
+        \end{itemize}
+        \item \textbf{Exploration Phase}:
+        \begin{itemize}
+            \item Compute local bounds: $lb_{local}(j) = lb(j)/t$, $ub_{local}(j) = ub(j)/t$
+            \item Update all coatis:
+            \[
+                X_i^{new}(j) = X_i(j) + (1 - 2r) \cdot \left( lb_{local}(j) + r \cdot (ub_{local}(j) - lb_{local}(j)) \right)
+            \]
+        \end{itemize}
+        \item Apply greedy selection: keep new position only if fitness improves.
+    \end{enumerate}
+\end{enumerate}
+
+\subsection{Benchmark Functions}
+
+We evaluate COA on 10 classical optimization benchmark functions (Table~\ref{tab:benchmarks}), all with \textbf{dimension $D = 30$}.
+
+\begin{table}[H]
+\centering
+\caption{Benchmark functions used in experiments.}
+\label{tab:benchmarks}
+\begin{tabular}{@{}clcc@{}}
+\toprule
+\textbf{ID} & \textbf{Name} & \textbf{Search Range} & \textbf{$f_{\min}$} \\
+\midrule
+F1  & Sphere          & $[-100, 100]^{30}$   & 0 \\
+F2  & Schwefel 2.22   & $[-10, 10]^{30}$     & 0 \\
+F3  & Schwefel 1.2    & $[-100, 100]^{30}$   & 0 \\
+F4  & Schwefel 2.21   & $[-100, 100]^{30}$   & 0 \\
+F5  & Rosenbrock      & $[-30, 30]^{30}$     & 0 \\
+F6  & Step Function   & $[-100, 100]^{30}$   & 0 \\
+F7  & Quartic + Noise & $[-1.28, 1.28]^{30}$ & 0 \\
+F8  & Schwefel 2.26   & $[-500, 500]^{30}$   & $-12569.5$ \\
+F9  & Rastrigin       & $[-5.12, 5.12]^{30}$ & 0 \\
+F10 & Ackley          & $[-32, 32]^{30}$     & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Functions F1--F7 are \textbf{unimodal} (simpler, faster to compute), while F8--F10 are \textbf{multimodal} (involve transcendental operations: \texttt{sin}, \texttt{cos}, \texttt{exp}).
+
+% =============================================================================
+\section{Implementation Details}
+% =============================================================================
+
+\subsection{Sequential C++ Implementation}
+
+The baseline implementation uses:
+\begin{itemize}
+    \item C++20 standard with \texttt{-O3} optimization
+    \item Mersenne Twister RNG (\texttt{std::mt19937\_64})
+    \item Pre-allocated scratch vectors to minimize heap allocation
+    \item Cached fitness values to avoid redundant evaluations
+    \item Machine-parsable log output for automated analysis
+\end{itemize}
+
+\subsection{OpenMP Implementation}
+
+Key parallelization decisions:
+\begin{itemize}
+    \item \textbf{Thread-local RNG}: Each thread uses its own \texttt{mt19937\_64} engine, seeded with \texttt{random\_device() + thread\_id}, eliminating lock contention on the RNG.
+    \item \textbf{Parallel loops}: Population initialization, fitness evaluation, and both phases of the main loop are parallelized with \texttt{\#pragma omp for}.
+    \item \textbf{Minimized critical sections}: Local-best accumulation pattern reduces critical sections to one per initialization phase.
+    \item \textbf{Single-thread tasks}: Logging and best-index updates use \texttt{\#pragma omp single} to avoid race conditions.
+    \item \textbf{\texttt{nowait} optimization}: Applied to the first-half exploitative loop where no data dependency exists with the second-half loop.
+\end{itemize}
+
+\subsection{CUDA C++ Implementation}
+
+GPU-accelerated design targeting NVIDIA T4 (Google Colab):
+\begin{itemize}
+    \item \textbf{One-thread-per-coati}: Each CUDA thread manages a complete solution vector and computes its own fitness.
+    \item \textbf{Device-side functions}: All 10 benchmark functions reimplemented as \texttt{\_\_device\_\_} functions; fitness is computed entirely on the GPU.
+    \item \textbf{cuRAND}: Per-thread \texttt{curandState} initialized once and reused across all iterations.
+    \item \textbf{Parallel reduction}: Custom shared-memory reduction kernel finds the global best coati in $O(\log N)$ per iteration.
+    \item \textbf{Flattened memory}: Population matrix stored as \texttt{double* d\_X} with index \texttt{X[i * D + j]} for coalesced memory access.
+    \item \textbf{Separate kernels}: Distinct kernels for exploitative phase, local bounds computation, and exploration phase.
+\end{itemize}
+
+The outer iteration loop remains on the CPU (host), launching kernels per iteration. This is necessary because each iteration depends on the previous best solution.
+
+% =============================================================================
+\section{Experimental Setup}
+% =============================================================================
+
+\subsection{Parameter Space}
+
+\begin{table}[H]
+\centering
+\caption{Experiment parameter space.}
+\label{tab:params}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Values} & \textbf{Count} \\
+\midrule
+Functions          & F1--F10                        & 10 \\
+Population sizes   & 200, 400, 600, 800, 1000       & 5  \\
+Iteration counts   & 500, 750, 1000                 & 3  \\
+OpenMP threads     & 1, 2, 4, 8, 16                 & 5  \\
+Repeated runs      & 5 per configuration            & 5  \\
+\midrule
+\textbf{Total Sequential} & $10 \times 5 \times 3 \times 5$ & \textbf{750} \\
+\textbf{Total OpenMP}     & $10 \times 5 \times 3 \times 5 \times 5$ & \textbf{3,750} \\
+\textbf{Total CUDA}       & $10 \times 5 \times 3 \times 5$ & \textbf{750} \\
+\textbf{Grand Total}      &                                 & \textbf{5,250} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Hardware}
+
+\begin{itemize}
+    \item \textbf{CPU experiments}: Linux / WSL environment with multi-core processor
+    \item \textbf{GPU experiments}: Google Colab with NVIDIA T4 GPU (2,560 CUDA cores, 16~GB GDDR6)
+\end{itemize}
+
+\subsection{Metrics}
+
+\begin{itemize}
+    \item \textbf{Speedup}: $S(p) = T_{seq} / T_{parallel}(p)$
+    \item \textbf{Parallel Efficiency}: $E(p) = S(p) / p$
+    \item \textbf{Serial Fraction} (Amdahl's Law): Estimated from $S(p) = 1 / (f + (1-f)/p)$, solved as $f = (1/S - 1/p) / (1 - 1/p)$
+\end{itemize}
+
+% =============================================================================
+\section{Results and Analysis}
+% =============================================================================
+
+\subsection{OpenMP Speedup Analysis}
+
+Table~\ref{tab:speedup} summarizes the OpenMP speedup across thread counts, averaged over all functions and configurations.
+
+\begin{table}[H]
+\centering
+\caption{OpenMP speedup statistics by thread count.}
+\label{tab:speedup}
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Threads} & \textbf{Avg Speedup} & \textbf{Min Speedup} & \textbf{Max Speedup} & \textbf{Std Dev} \\
+\midrule
+1  & 0.726 & 0.119 & 1.045 & 0.114 \\
+2  & 1.217 & 0.835 & 1.527 & 0.125 \\
+4  & 1.748 & 1.314 & 2.381 & 0.163 \\
+8  & 2.043 & 0.055 & 2.808 & 0.391 \\
+16 & 0.365 & 0.080 & 0.989 & 0.213 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key observations:}
+\begin{itemize}
+    \item Speedup peaks at \textbf{T=8} with an average of 2.04$\times$ and maximum of 2.81$\times$.
+    \item At \textbf{T=16}, performance \textit{degrades below sequential} (avg 0.37$\times$), indicating severe thread management overhead.
+    \item Even at \textbf{T=1}, OpenMP is 27.4\% slower than sequential, quantifying the pure runtime overhead of the OpenMP framework.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/01_avg_speedup_vs_threads.png}
+    \caption{Average OpenMP speedup versus thread count. Speedup peaks at T=8 and collapses at T=16 due to thread management overhead.}
+    \label{fig:avg_speedup}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/03_speedup_by_function_and_threads.png}
+    \caption{OpenMP speedup broken down by function and thread count. Shows consistent peak performance at T=8 across most functions.}
+    \label{fig:speedup_by_threads}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/06_time_seq_vs_omp.png}
+    \caption{Execution time comparison between Sequential baseline and optimal OpenMP configuration (T=8) for all benchmark functions.}
+    \label{fig:time_seq_omp}
+\end{figure}
+
+\subsection{Parallel Efficiency}
+
+\begin{table}[H]
+\centering
+\caption{Parallel efficiency by thread count.}
+\label{tab:efficiency}
+\begin{tabular}{@{}ccl@{}}
+\toprule
+\textbf{Threads} & \textbf{Avg Efficiency} & \textbf{Interpretation} \\
+\midrule
+1  & 72.6\% & Good (overhead of OpenMP runtime) \\
+2  & 60.8\% & Good \\
+4  & 43.7\% & Moderate --- overhead becoming significant \\
+8  & 25.5\% & Poor --- diminishing returns \\
+16 & 2.3\%  & Very poor --- severe overhead \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Efficiency drops sharply beyond 4 threads. At T=16, only 2.3\% of theoretical parallel capacity is utilized, confirming that the workload per thread is insufficient to amortize synchronization costs.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/04_efficiency_vs_threads.png}
+    \caption{Average parallel efficiency by thread count. Efficiency drops steadily as thread count increases, falling below 50\% after T=4.}
+    \label{fig:efficiency}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/05_efficiency_per_function.png}
+    \caption{Parallel efficiency achieved for each benchmark function at T=8.}
+    \label{fig:eff_per_func}
+\end{figure}
+
+\subsection{Per-Function OpenMP Speedup (T=8)}
+
+\begin{table}[H]
+\centering
+\caption{Average OpenMP speedup at T=8, by benchmark function.}
+\label{tab:per_func_speedup}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Function} & \textbf{Avg Speedup (T=8)} & \textbf{Assessment} \\
+\midrule
+Sphere (F1)          & $\sim$2.0$\times$ & Moderate speedup \\
+Schwefel 2.22 (F2)   & $\sim$2.0$\times$ & Moderate speedup \\
+Schwefel 1.2 (F3)    & $\sim$2.0$\times$ & Moderate speedup \\
+Schwefel 2.21 (F4)   & $\sim$2.0$\times$ & Moderate speedup \\
+Rosenbrock (F5)      & $\sim$2.0$\times$ & Moderate speedup \\
+Step (F6)            & $\sim$2.0$\times$ & Moderate speedup \\
+Quartic Noise (F7)   & $\sim$2.0$\times$ & Moderate speedup \\
+Schwefel 2.26 (F8)   & $\sim$2.3$\times$ & Best performer \\
+Rastrigin (F9)       & $\sim$2.2$\times$ & Good speedup \\
+Ackley (F10)         & $\sim$2.2$\times$ & Good speedup \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Compute-intensive functions (F8, F9, F10) achieve slightly better speedup, as the per-thread work is more substantial relative to synchronization overhead.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/02_speedup_per_function.png}
+    \caption{Average OpenMP speedup achieved per function at the optimal thread count.}
+    \label{fig:speedup_per_func}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/09_scalability_heatmap.png}
+    \caption{Speedup heatmap across benchmark functions and thread counts. Green indicates higher speedup, red indicates slowdown.}
+    \label{fig:heatmap}
+\end{figure}
+
+\subsection{CUDA GPU Performance}
+
+\begin{table}[H]
+\centering
+\caption{CUDA speedup over sequential baseline, per function.}
+\label{tab:cuda}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Function} & \textbf{Avg Speedup} & \textbf{Max Speedup} & \textbf{Avg Time (ms)} \\
+\midrule
+Sphere (F1)         & 1.28$\times$ & 2.94$\times$ & 316 \\
+Schwefel 2.22 (F2)  & 1.29$\times$ & 2.75$\times$ & 283 \\
+Schwefel 1.2 (F3)   & 1.30$\times$ & 2.80$\times$ & 282 \\
+Schwefel 2.21 (F4)  & 1.27$\times$ & 2.73$\times$ & 284 \\
+Rosenbrock (F5)     & 1.22$\times$ & 2.30$\times$ & 303 \\
+Step (F6)           & 1.38$\times$ & 2.65$\times$ & 291 \\
+Quartic Noise (F7)  & 1.28$\times$ & 2.62$\times$ & 289 \\
+Schwefel 2.26 (F8)  & \textbf{2.25}$\times$ & \textbf{4.36}$\times$ & 424 \\
+Rastrigin (F9)      & 2.05$\times$ & 4.05$\times$ & 390 \\
+Ackley (F10)        & 1.94$\times$ & 3.87$\times$ & 397 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key observations:}
+\begin{itemize}
+    \item CUDA achieves the highest speedup on \textbf{multimodal functions} (F8--F10) that involve expensive transcendental operations (\texttt{sin}, \texttt{cos}, \texttt{exp}, \texttt{sqrt}).
+    \item The average CUDA speedup across all functions is \textbf{1.53$\times$}, with a maximum of \textbf{4.36$\times$} (F8, large population).
+    \item For \textbf{unimodal functions} (F1--F7), CUDA speedup is more modest (1.2--1.4$\times$) because the per-thread computation is too lightweight to overcome kernel launch and memory transfer overhead.
+    \item CUDA performance \textbf{scales with population size}: larger populations provide more threads for the GPU to utilize.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/16_cuda_speedup_per_function.png}
+    \caption{CUDA GPU speedup over sequential baseline for each benchmark function. Multimodal functions (F8--F10) with transcendental operations benefit most from GPU acceleration.}
+    \label{fig:cuda_speedup}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/17_cuda_vs_seq_time.png}
+    \caption{Average execution time comparison between Sequential (CPU) and CUDA (GPU).}
+    \label{fig:cuda_time}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/20_omp_vs_cuda_speedup.png}
+    \caption{Speedup comparison: OpenMP (at T=8) versus CUDA per function.}
+    \label{fig:omp_vs_cuda}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/19_all_implementations_time.png}
+    \caption{Combined execution time comparison across all three implementations (Sequential, OpenMP T=8, CUDA).}
+    \label{fig:all_time}
+\end{figure}
+
+\subsection{Scalability Analysis}
+
+\subsubsection{Marginal Speedup Gain}
+
+\begin{table}[H]
+\centering
+\caption{Marginal speedup gain when doubling threads.}
+\label{tab:marginal}
+\begin{tabular}{@{}ccc@{}}
+\toprule
+\textbf{Transition} & \textbf{Marginal Gain} & \textbf{Linear Scaling Ratio} \\
+\midrule
+$T=1 \rightarrow T=2$   & +0.491 & 67.7\% \\
+$T=2 \rightarrow T=4$   & +0.531 & 43.7\% \\
+$T=4 \rightarrow T=8$   & +0.295 & 16.9\% \\
+$T=8 \rightarrow T=16$  & $-$1.678 & $-$82.1\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The negative marginal gain at T=16 confirms that thread overhead dominates at high thread counts.
+
+\subsubsection{Workload Size Impact}
+
+\begin{itemize}
+    \item \textbf{Small workloads} ($\leq$200K operations): Average speedup = 1.107$\times$
+    \item \textbf{Large workloads} ($>$500K operations): Average speedup = 1.291$\times$
+\end{itemize}
+
+Larger workloads benefit more from parallelization, as expected from Gustafson's Law perspective.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/10_workload_vs_speedup.png}
+    \caption{Speedup versus total workload size (Coatis $\times$ Iterations). Larger workloads consistently yield better parallel speedup.}
+    \label{fig:workload}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/07_time_vs_population.png}
+    \caption{Sequential execution time scaling with population size.}
+    \label{fig:time_pop}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/18_cuda_speedup_vs_population.png}
+    \caption{CUDA speedup versus population size. GPU acceleration becomes more effective as the amount of parallel work increases.}
+    \label{fig:cuda_pop}
+\end{figure}
+
+\subsection{Amdahl's Law Analysis}
+
+Using the observed speedup at T=16, we estimate the serial fraction $f$ for each function via Amdahl's Law:
+
+\[
+S(p) = \frac{1}{f + \frac{1-f}{p}} \implies f = \frac{1/S - 1/p}{1 - 1/p}
+\]
+
+\begin{table}[H]
+\centering
+\caption{Estimated serial fraction from Amdahl's Law (T=16).}
+\label{tab:amdahl}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Function} & \textbf{Serial Fraction ($f$)} & \textbf{Max Theoretical Speedup} \\
+\midrule
+All functions (F1--F10) & $\approx$1.00 & $\approx$1.0$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The estimated serial fraction is very high ($\approx$1.0) when measured at T=16. This is partly an artifact of the severe overhead at T=16 and partly reflects the fundamental structure of COA: each iteration depends on the global best from the previous iteration, creating a serial dependency chain.
+
+\textbf{Important nuance}: At T=4 and T=8, meaningful speedup is achieved (1.75--2.04$\times$), suggesting that the ``effective'' serial fraction is lower at moderate thread counts. The high serial fraction at T=16 is dominated by overhead rather than algorithmic seriality.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/14_amdahl_vs_actual.png}
+    \caption{Actual measured average speedup compared against Amdahl's Law theoretical curves for various serial fractions.}
+    \label{fig:amdahl}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/15_serial_fraction_per_function.png}
+    \caption{Estimated serial fraction for each benchmark function, calculated at T=8.}
+    \label{fig:serial_fraction}
+\end{figure}
+
+\subsection{Overhead and Anomaly Analysis}
+
+\begin{table}[H]
+\centering
+\caption{Slowdown analysis summary.}
+\label{tab:slowdowns}
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Total slowdown cases & 1,549 / 3,750 (41.3\%) \\
+T=1 slowdown rate  & 99.7\% (OpenMP overhead) \\
+T=2 slowdown rate  & 4.4\% \\
+T=8 slowdown rate  & 2.4\% \\
+T=16 slowdown rate & 100.0\% (always slower) \\
+Super-linear cases & 2 (0.1\% --- likely cache effects) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Worst slowdowns} occurred at T=16 with small populations (C=200), where thread management overhead vastly exceeds the benefit of parallelism. The worst case (F2, C200, I500, T=8) showed a 0.055$\times$ speedup (18$\times$ slower than sequential).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/12_slowdown_rate_by_threads.png}
+    \caption{Percentage of runs that were slower than the sequential baseline at each thread count.}
+    \label{fig:slowdown_rate}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/11_omp_overhead_at_T1.png}
+    \caption{OpenMP runtime overhead measured at T=1 (compared to sequential baseline).}
+    \label{fig:overhead_t1}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{graphs/13_speedup_distribution.png}
+    \caption{Box plot of speedup distribution by thread count, showing the variance across all configurations.}
+    \label{fig:distribution}
+\end{figure}
+
+% =============================================================================
+\section{Discussion}
+% =============================================================================
+
+\subsection{Why is Parallel Efficiency Low?}
+
+Several factors contribute to the limited parallel scalability of COA:
+
+\begin{enumerate}
+    \item \textbf{Serial iteration dependency}: Each iteration updates the global best, which all threads need at the start of the next iteration. This creates an inherent serial bottleneck.
+    \item \textbf{Lightweight fitness functions}: For D=30, each fitness evaluation involves only $\sim$30--60 floating-point operations. This provides very little computational work to amortize thread synchronization overhead.
+    \item \textbf{OpenMP runtime overhead}: Thread creation, barrier synchronization, and work-sharing constructs add fixed costs per iteration.
+    \item \textbf{Memory access patterns}: The 2D population matrix (\texttt{vector<vector<double>>}) has poor spatial locality for multi-threaded access.
+\end{enumerate}
+
+\subsection{CUDA vs OpenMP}
+
+CUDA outperforms OpenMP for compute-heavy functions because:
+\begin{itemize}
+    \item The GPU provides \textit{thousands} of hardware threads vs.\ $\leq$16 CPU threads.
+    \item Flattened memory layout (\texttt{X[i * D + j]}) enables coalesced global memory access.
+    \item Per-thread register-based computation avoids shared-memory contention.
+    \item For functions involving transcendental operations, GPU SFUs (Special Function Units) provide hardware-accelerated \texttt{sin}/\texttt{cos}/\texttt{exp}.
+\end{itemize}
+
+However, CUDA is limited by:
+\begin{itemize}
+    \item Kernel launch overhead ($\sim$5--20~$\mu$s per launch, 4--5 launches per iteration).
+    \item Host-device memory transfers for best-index updates.
+    \item The outer iteration loop remaining on the CPU.
+\end{itemize}
+
+\subsection{Recommendations}
+
+Based on our findings:
+
+\begin{enumerate}
+    \item \textbf{Use 4--8 OpenMP threads} for the best speedup-to-efficiency trade-off.
+    \item \textbf{Use CUDA for compute-heavy functions} (F8--F10) with large populations ($\geq$600).
+    \item \textbf{Add an OpenMP \texttt{if} clause} to disable parallelism for small workloads ($N < 400$).
+    \item \textbf{Consider algorithmic restructuring}: batch multiple iterations or use asynchronous updates to reduce serial dependencies.
+    \item \textbf{CUDA occupancy tuning}: experiment with different block sizes and explore shared-memory caching for the Iguana vector.
+\end{enumerate}
+
+% =============================================================================
+\section{Convergence and Final Efficiency Analysis}
+% =============================================================================
+
+This section presents the convergence behavior of the algorithm and a final parallel efficiency heatmap.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{graphs/21_convergence_1.png}
+        \caption{F1 (Sphere)}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{graphs/21_convergence_8.png}
+        \caption{F8 (Schwefel 2.26)}
+    \end{subfigure}
+    \caption{Convergence curves for $N=1000$ coatis and $T=1000$ iterations. All implementations converge to similar final solutions, confirming correctness.}
+    \label{fig:convergence}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{graphs/25_efficiency_heatmap.png}
+    \caption{Parallel efficiency heatmap across functions and thread counts.}
+    \label{fig:efficiency_heatmap}
+\end{figure}
+
+% =============================================================================
+\section{Conclusion}
+% =============================================================================
+
+This project provides a thorough HPC analysis of the Coati Optimization Algorithm across three computational paradigms. Our key conclusions are:
+
+\begin{enumerate}
+    \item \textbf{COA is parallelizable, but with limitations}: The inherent serial dependency between iterations limits maximum speedup regardless of the number of processors.
+    \item \textbf{Optimal OpenMP configuration}: 4--8 threads provide the best balance of speedup (1.75--2.04$\times$) and efficiency (25--44\%).
+    \item \textbf{GPU acceleration is function-dependent}: CUDA achieves up to 4.36$\times$ speedup for compute-intensive functions but only 1.2--1.4$\times$ for lightweight ones.
+    \item \textbf{Thread management overhead is significant}: OpenMP imposes $\sim$27\% overhead even at T=1, and performance degrades below sequential at T=16.
+    \item \textbf{Larger workloads scale better}: Consistent with both Amdahl's and Gustafson's Laws.
+\end{enumerate}
+
+\subsection{Future Work}
+
+\begin{itemize}
+    \item \textbf{CUDA occupancy tuning}: Optimize block sizes and shared memory usage.
+    \item \textbf{Multi-GPU experiments}: Distribute population across multiple GPUs.
+    \item \textbf{Asynchronous COA}: Relax the synchronous iteration structure to improve parallel fraction.
+    \item \textbf{Memory coalescing analysis}: Profile and optimize GPU memory access patterns.
+    \item \textbf{Higher dimensions}: Test with $D = 100, 500, 1000$ to increase per-thread work.
+    \item \textbf{Comparison with other metaheuristics}: Benchmark parallel COA against parallel PSO, GA, and DE.
+\end{itemize}
+
+% =============================================================================
+% References
+% =============================================================================
+\begin{thebibliography}{9}
+
+\bibitem{dehghani2023}
+Dehghani, M., Montazeri, Z., Trojovsk\'{a}, E., \& Trojovsk\'{y}, P. (2023).
+\textit{Coati Optimization Algorithm: A new bio-inspired metaheuristic algorithm for solving optimization problems.}
+Knowledge-Based Systems, 259, 110011.
+
+\bibitem{amdahl1967}
+Amdahl, G. M. (1967).
+\textit{Validity of the single processor approach to achieving large scale computing capabilities.}
+Proceedings of the April 18-20, 1967, Spring Joint Computer Conference, 483--485.
+
+\bibitem{gustafson1988}
+Gustafson, J. L. (1988).
+\textit{Reevaluating Amdahl's law.}
+Communications of the ACM, 31(5), 532--533.
+
+\bibitem{openmp}
+OpenMP Architecture Review Board. (2021).
+\textit{OpenMP Application Programming Interface, Version 5.2.}
+\url{https://www.openmp.org/specifications/}
+
+\bibitem{cuda}
+NVIDIA Corporation. (2023).
+\textit{CUDA C++ Programming Guide.}
+\url{https://docs.nvidia.com/cuda/cuda-c-programming-guide/}
+
+\end{thebibliography}
+
+% =============================================================================
+\end{document}
+% =============================================================================
