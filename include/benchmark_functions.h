@@ -6,7 +6,7 @@
 
 using Vec = std::vector<double>;
 
-inline double PI() { return 3.14159265358979323846; }
+constexpr double PI = 3.14159265358979323846;
 
 /* ---------------- Ufun helper ---------------- */
 inline double Ufun(const Vec &x, double a, double k, double m) {
@@ -45,10 +45,10 @@ inline double F2(const Vec &x) {
 inline double F3(const Vec &x) {
     int dim = (int)x.size();
     double R = 0.0;
+    double running_sum = 0.0;
     for (int i = 0; i < dim; ++i) {
-        double sum_i = 0.0;
-        for (int j = 0; j <= i; ++j) sum_i += x[j];
-        R += sum_i * sum_i;
+        running_sum += x[i];
+        R += running_sum * running_sum;
     }
     return R;
 }
@@ -89,7 +89,8 @@ inline double F7(const Vec &x) {
     int dim = (int)x.size();
     double R = 0.0;
     for (int i = 0; i < dim; ++i) {
-        R += (i + 1) * std::pow(x[i], 4);
+        double x2 = x[i] * x[i];
+        R += (i + 1) * x2 * x2;
     }
     R += dist(rng); // + rand
     return R;
@@ -109,7 +110,7 @@ inline double F9(const Vec &x) {
     int dim = (int)x.size();
     double R = 0.0;
     for (double v : x) {
-        R += v*v - 10.0 * std::cos(2.0 * PI() * v);
+        R += v*v - 10.0 * std::cos(2.0 * PI * v);
     }
     return R + 10.0 * dim;
 }
@@ -120,7 +121,7 @@ inline double F10(const Vec &x) {
     double sum1 = 0.0, sum2 = 0.0;
     for (double v : x) {
         sum1 += v*v;
-        sum2 += std::cos(2.0 * PI() * v);
+        sum2 += std::cos(2.0 * PI * v);
     }
     return -20.0 * std::exp(-0.2 * std::sqrt(sum1 / dim))
            - std::exp(sum2 / dim) + 20.0 + std::exp(1.0);

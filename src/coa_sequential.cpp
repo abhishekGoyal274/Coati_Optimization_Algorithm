@@ -1,7 +1,7 @@
 #include <bits/stdc++.h>
 #include <random>
 #include <chrono>
-#include "./_benchmark_functions.h"
+#include "../include/benchmark_functions.h"
 
 using namespace std;
 
@@ -17,13 +17,8 @@ static std::mt19937_64 rng{std::random_device{}()};
 static std::uniform_real_distribution<double> dist(0.0, 1.0);
 static std::uniform_int_distribution<int> coin(1, 2);
 
-double urand(){
-    return dist(rng);
-}
-
-int urandI(){
-    return coin(rng);
-}
+double urand(){ return dist(rng); }
+int urandI(){ return coin(rng); }
 
 COAResult COA_sequential(int F, int Coatis, int Max_iterations, vector<double>& best_score_log, vector<int>& iter_log)
 {
@@ -201,13 +196,15 @@ COAResult COA_sequential(int F, int Coatis, int Max_iterations, vector<double>& 
 
 int main(int argc, char **argv)
 {
-    int F{1}, Coatis{30}, Max_iterations{500};
+    int F{1}, Coatis{30}, Max_iterations{500}, Run{1};
     if (argc >= 2)
         F = atoi(argv[1]);
     if (argc >= 3)
         Coatis = atoi(argv[2]);
     if (argc >= 4)
         Max_iterations = atoi(argv[3]);
+    if (argc >= 5)
+        Run = atoi(argv[4]);
 
     // Logs
     vector<double> best_score_log;
@@ -225,9 +222,10 @@ int main(int argc, char **argv)
 
     // Construct per-run log filename
     std::string log_filename =
-        "_main_logs/F" + std::to_string(F) +
+        "logs/sequential/F" + std::to_string(F) +
         "_C" + std::to_string(Coatis) +
-        "_I" + std::to_string(Max_iterations) + ".log";
+        "_I" + std::to_string(Max_iterations) +
+        "_R" + std::to_string(Run) + ".log";
 
     // Open file (overwrite per run — correct)
     std::ofstream log(log_filename, std::ios::out);
